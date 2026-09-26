@@ -1,0 +1,424 @@
+{
+  "metadata": {
+    "tool": "CodePilot Review Assistant",
+    "version": "1.0.0",
+    "powered_by": "Bob 2.0 — IBM",
+    "repository": "Order Processing Service",
+    "analysis_date": "2025-07-16",
+    "agents_used": [
+      "StaticAnalysisAgent",
+      "ChangeImpactAgent",
+      "DocumentationAgent",
+      "TestCoverageAgent",
+      "ReviewSummaryAgent"
+    ],
+    "overall_risk": "critical",
+    "summary": {
+      "total_issues": 24,
+      "critical": 5,
+      "high": 4,
+      "medium": 9,
+      "low": 6,
+      "missing_tests": 25,
+      "doc_gaps": 11,
+      "estimated_line_coverage_pct": 9,
+      "total_functions": 21,
+      "functions_with_any_test": 3
+    }
+  },
+
+  "static_analysis": [
+    {
+      "id": "SA-001",
+      "file": "src/sample_repo/app.py",
+      "line": 13,
+      "category": "bug",
+      "severity": "critical",
+      "title": "Unclosed file handle and no error handling on config load",
+      "description": "CONFIG is loaded via json.load(open('config.json')) without closing the file handle and without any try/except. If the file is missing or malformed, the entire module fails to import with an unhandled exception, crashing the application at startup.",
+      "suggested_fix": "try:\n    with open('config.json', encoding='utf-8') as f:\n        CONFIG = json.load(f)\nexcept (FileNotFoundError, json.JSONDecodeError) as e:\n    raise RuntimeError(f'Failed to load config: {e}')"
+    },
+    {
+      "id": "SA-002",
+      "file": "src/sample_repo/app.py",
+      "line": 16,
+      "category": "security",
+      "severity": "critical",
+      "title": "Hardcoded fallback secret key",
+      "description": "SECRET_KEY falls back to the literal string 'hardcoded-fallback-secret-123' if the config key is absent. Any deployment where config.json omits 'secret_key' silently uses a publicly known, trivially guessable secret.",
+      "suggested_fix": "SECRET_KEY = CONFIG.get('secret_key')\nif not SECRET_KEY:\n    raise RuntimeError('secret_key must be set in config.json')"
+    },
+    {
+      "id": "SA-003",
+      "file": "src/sample_repo/app.py",
+      "line": 62,
+      "category": "security",
+      "severity": "critical",
+      "title": "SQL injection in get_price via f-string query",
+      "description": "The SKU value from external input is interpolated directly into a SQL string. An attacker-controlled SKU can break out of the string literal, inject arbitrary SQL, and read, modify, or delete data.",
+      "suggested_fix": "price = self.db.query('SELECT price FROM products WHERE sku = %s', (sku,))"
+    },
+    {
+      "id": "SA-004",
+      "file": "src/sample_repo/app.py",
+      "line": 73,
+      "category": "security",
+      "severity": "critical",
+      "title": "SQL injection in _save_order via f-string INSERT",
+      "description": "order['id'], order['user_id'], and order['total'] are interpolated directly into an INSERT statement. This is also executed outside a transaction with no rollback capability.",
+      "suggested_fix": "with self.db.transaction():\n    self.db.execute(\n        'INSERT INTO orders (id, user_id, total) VALUES (%s, %s, %s)',\n        (order['id'], order['user_id'], order['total'])\n    )"
+    },
+    {
+      "id": "SA-005",
+      "file": "src/sample_repo/app.py",
+      "line": 114,
+      "category": "security",
+      "severity": "critical",
+      "title": "Plaintext password storage",
+      "description": "In UserManager.create_user, the password is stored as-is. The authenticate method also compares in plaintext. A DB dump immediately exposes all user passwords.",
+      "suggested_fix": "import bcrypt\nhashed = bcrypt.hashpw(password.encode(), bcrypt.gensalt())\nuser['password'] = hashed\n# In authenticate:\nbcrypt.checkpw(password.encode(), user['password'])"
+    },
+    {
+      "id": "SA-006",
+      "file": "src/sample_repo/app.py",
+      "line": 68,
+      "category": "security",
+      "severity": "high",
+      "title": "MD5 used for order ID generation",
+      "description": "MD5 is cryptographically broken, and timestamp-seeded IDs are predictable and not collision-resistant under high load, making order IDs guessable.",
+      "suggested_fix": "import uuid\nreturn str(uuid.uuid4())"
+    },
+    {
+      "id": "SA-007",
+      "file": "src/sample_repo/app.py",
+      "line": 30,
+      "category": "bug",
+      "severity": "high",
+      "title": "KeyError on missing order_data fields with no input validation",
+      "description": "process_order directly accesses order_data['user_id'] and order_data['items'] without any validation. Missing keys propagate as raw KeyError with no context.",
+      "suggested_fix": "if 'user_id' not in order_data or 'items' not in order_data:\n    raise ValueError('order_data must contain user_id and items')"
+    },
+    {
+      "id": "SA-008",
+      "file": "src/sample_repo/app.py",
+      "line": 40,
+      "category": "smell",
+      "severity": "medium",
+      "title": "Magic number for discount threshold and rate",
+      "description": "The values 1000 and 0.9 appear as bare literals with no named constant or documentation.",
+      "suggested_fix": "DISCOUNT_THRESHOLD = 1000\nDISCOUNT_MULTIPLIER = 0.9"
+    },
+    {
+      "id": "SA-009",
+      "file": "src/sample_repo/app.py",
+      "line": 82,
+      "category": "bug",
+      "severity": "medium",
+      "title": "get_all_orders exposes mutable internal list",
+      "description": "Returns a direct reference to self.orders. Any caller that mutates the returned list silently corrupts the processor's internal state.",
+      "suggested_fix": "return list(self.orders)"
+    },
+    {
+      "id": "SA-010",
+      "file": "src/sample_repo/app.py",
+      "line": 84,
+      "category": "bug",
+      "severity": "medium",
+      "title": "cancel_order does not persist cancellation to database",
+      "description": "The method updates the in-memory status to 'cancelled' but never issues a corresponding UPDATE to the database. Cancellation is lost after process restart.",
+      "suggested_fix": "self.db.execute('UPDATE orders SET status = %s WHERE id = %s', ('cancelled', order_id))"
+    },
+    {
+      "id": "SA-011",
+      "file": "src/sample_repo/app.py",
+      "line": 93,
+      "category": "bug",
+      "severity": "medium",
+      "title": "calculate_tax returns None for unknown country",
+      "description": "The if/elif chain has no else or default return. For any country code not in {US, UK, DE}, the function returns None implicitly. Callers using the result arithmetically will receive a TypeError.",
+      "suggested_fix": "else:\n    raise ValueError(f'Tax rate not defined for country: {country}')"
+    },
+    {
+      "id": "SA-012",
+      "file": "src/sample_repo/app.py",
+      "line": 115,
+      "category": "bug",
+      "severity": "medium",
+      "title": "Non-unique user ID generation",
+      "description": "User IDs are assigned as len(self.users) + 1. If any user is ever deleted, the next insertion can produce an ID already assigned to a previous user.",
+      "suggested_fix": "Use a monotonically incrementing counter:\nself._next_id = 1\nuser['id'] = self._next_id\nself._next_id += 1"
+    },
+    {
+      "id": "SA-013",
+      "file": "src/sample_repo/app.py",
+      "line": 140,
+      "category": "bug",
+      "severity": "medium",
+      "title": "bulk_import_orders opens file without context manager or encoding",
+      "description": "open(file_path).read() leaks the file handle and specifies no encoding. On Windows the default encoding may silently corrupt non-ASCII data.",
+      "suggested_fix": "with open(file_path, encoding='utf-8') as f:\n    data = f.read()"
+    },
+    {
+      "id": "SA-014",
+      "file": "src/sample_repo/app.py",
+      "line": 149,
+      "category": "bug",
+      "severity": "medium",
+      "title": "Fragile CSV parsing does not handle quoted fields or errors",
+      "description": "Manual split(',') does not handle RFC 4180 quoted fields or embedded commas. parts[2] accessed without bounds checking will raise IndexError on short lines.",
+      "suggested_fix": "import csv\nwith open(file_path, encoding='utf-8', newline='') as f:\n    reader = csv.DictReader(f)\n    for row in reader:\n        ..."
+    },
+    {
+      "id": "SA-015",
+      "file": "src/sample_repo/app.py",
+      "line": 168,
+      "category": "bug",
+      "severity": "medium",
+      "title": "String-based date comparison is fragile and incorrect",
+      "description": "created_at is stored as str(datetime.datetime.now()) and compared lexicographically. Mixed formats or timezone differences produce wrong results silently.",
+      "suggested_fix": "from datetime import datetime\ncreated = datetime.fromisoformat(order['created_at'])\nif start_date <= created <= end_date:"
+    },
+    {
+      "id": "SA-016",
+      "file": "src/sample_repo/app.py",
+      "line": 79,
+      "category": "smell",
+      "severity": "low",
+      "title": "print used instead of logger for email notification",
+      "description": "print() output is invisible in log aggregation systems, cannot be filtered by level, and provides no timestamps or context.",
+      "suggested_fix": "logger.info('Sending email to user %s for order %s', user_id, order['id'])"
+    },
+    {
+      "id": "SA-017",
+      "file": "src/sample_repo/app.py",
+      "line": 78,
+      "category": "smell",
+      "severity": "low",
+      "title": "String concatenation for message building instead of f-string",
+      "description": "The notification message is built with multiple + concatenations and str() casts.",
+      "suggested_fix": "msg = f\"Dear user {user_id}, your order {order['id']} total is ${order['total']:.2f}\""
+    },
+    {
+      "id": "SA-018",
+      "file": "src/sample_repo/app.py",
+      "line": 131,
+      "category": "complexity",
+      "severity": "low",
+      "title": "O(n) linear scan in get_user instead of indexed lookup",
+      "description": "UserManager stores users keyed by username but get_user searches by ID via full iteration. As user count grows this becomes increasingly expensive.",
+      "suggested_fix": "Maintain a secondary dict keyed by user ID: self._users_by_id = {}"
+    },
+    {
+      "id": "SA-019",
+      "file": "src/sample_repo/app.py",
+      "line": 160,
+      "category": "complexity",
+      "severity": "low",
+      "title": "generate_report loads all orders into memory",
+      "description": "The function retrieves all orders in-memory and filters them. For large datasets this is a scalability problem.",
+      "suggested_fix": "Push filtering to the database:\ndb.query('SELECT * FROM orders WHERE created_at BETWEEN %s AND %s', (start_date, end_date))"
+    },
+    {
+      "id": "SA-020",
+      "file": "src/sample_repo/utils.py",
+      "line": 13,
+      "category": "security",
+      "severity": "high",
+      "title": "Overly permissive email validation regex",
+      "description": "The regex r'.+@.+' matches any string with an @ surrounded by at least one character, accepting 'a@b', '@@@', or 'x@y@z'.",
+      "suggested_fix": "EMAIL_RE = re.compile(r'^[\\w.+-]+@[\\w-]+\\.[\\w.]+$')\nreturn bool(EMAIL_RE.match(email))"
+    },
+    {
+      "id": "SA-021",
+      "file": "src/sample_repo/utils.py",
+      "line": 38,
+      "category": "bug",
+      "severity": "high",
+      "title": "chunk raises ZeroDivisionError when size is 0",
+      "description": "chunk(lst, 0) passes size=0 to range(0, len(lst), 0), which raises ValueError. No guard exists.",
+      "suggested_fix": "if size <= 0:\n    raise ValueError(f'chunk size must be a positive integer, got {size}')"
+    },
+    {
+      "id": "SA-022",
+      "file": "src/sample_repo/utils.py",
+      "line": 44,
+      "category": "security",
+      "severity": "medium",
+      "title": "sanitize_input only strips whitespace — not a real sanitizer",
+      "description": "The function only calls str(value).strip(). It performs no escaping, HTML encoding, SQL metacharacter removal, or length limiting. Callers may believe input is safe and skip further validation.",
+      "suggested_fix": "Rename to normalize_whitespace() to avoid false confidence, or implement context-appropriate sanitization."
+    },
+    {
+      "id": "SA-023",
+      "file": "src/sample_repo/utils.py",
+      "line": 51,
+      "category": "smell",
+      "severity": "low",
+      "title": "Dead code: _legacy_format_price is never called",
+      "description": "_legacy_format_price is defined but never referenced anywhere. Dead code increases cognitive load.",
+      "suggested_fix": "Remove the function."
+    },
+    {
+      "id": "SA-024",
+      "file": "src/sample_repo/utils.py",
+      "line": 16,
+      "category": "smell",
+      "severity": "low",
+      "title": "retry has fixed sleep interval and catches bare Exception",
+      "description": "retry catches bare Exception (too broad), logs nothing on intermediate failures, and always sleeps exactly 1 second. Transient vs permanent errors are indistinguishable.",
+      "suggested_fix": "Add exponential backoff, specific exception types, and warning logging on each retry attempt."
+    }
+  ],
+
+  "change_impact": {
+    "dependency_map": [
+      {"from": "app.OrderProcessor.process_order", "to": "app.OrderProcessor.get_price", "type": "calls"},
+      {"from": "app.OrderProcessor.process_order", "to": "app.OrderProcessor._generate_id", "type": "calls"},
+      {"from": "app.OrderProcessor.process_order", "to": "app.OrderProcessor._save_order", "type": "calls"},
+      {"from": "app.OrderProcessor.process_order", "to": "app.OrderProcessor._notify_user", "type": "calls"},
+      {"from": "app.OrderProcessor.get_price", "to": "app.OrderProcessor.db", "type": "depends_on"},
+      {"from": "app.OrderProcessor._save_order", "to": "app.OrderProcessor.db", "type": "depends_on"},
+      {"from": "app.bulk_import_orders", "to": "app.OrderProcessor", "type": "instantiates"},
+      {"from": "app.bulk_import_orders", "to": "app.OrderProcessor.process_order", "type": "calls"},
+      {"from": "app.generate_report", "to": "app.OrderProcessor", "type": "instantiates"},
+      {"from": "app.generate_report", "to": "app.OrderProcessor.get_all_orders", "type": "calls"},
+      {"from": "app", "to": "config.json", "type": "file_dependency"},
+      {"from": "tests.test_orders", "to": "app.OrderProcessor", "type": "imports"},
+      {"from": "tests.test_orders", "to": "app.UserManager", "type": "imports"}
+    ],
+    "risk_assessment": [
+      {"component": "app.OrderProcessor.process_order", "risk_level": "critical", "reason": "Central orchestrator with no error handling or rollback. Any dependency failure silently corrupts state."},
+      {"component": "app.OrderProcessor.get_price", "risk_level": "critical", "reason": "SQL injection + db=None crash at construction time."},
+      {"component": "app.OrderProcessor._save_order", "risk_level": "critical", "reason": "SQL injection + no transaction wrapping."},
+      {"component": "app.CONFIG", "risk_level": "critical", "reason": "Module-level open() crashes entire module on import if config.json missing."},
+      {"component": "app.UserManager.create_user", "risk_level": "high", "reason": "Plaintext passwords, non-unique IDs under deletions."},
+      {"component": "app.UserManager.authenticate", "risk_level": "high", "reason": "Plaintext comparison. Tightly coupled to create_user."},
+      {"component": "app.bulk_import_orders", "risk_level": "high", "reason": "One bad CSV row aborts entire batch. No per-row error isolation."},
+      {"component": "app.OrderProcessor.calculate_tax", "risk_level": "high", "reason": "Returns None for unknown countries — causes TypeError in arithmetic callers."},
+      {"component": "app.generate_report", "risk_level": "medium", "reason": "Always returns empty list (instantiates fresh OrderProcessor). String date comparison is fragile."},
+      {"component": "app.OrderProcessor.cancel_order", "risk_level": "medium", "reason": "No DB write, no user notification. In-memory and DB diverge."},
+      {"component": "app.OrderProcessor.get_all_orders", "risk_level": "medium", "reason": "Returns internal mutable list — external mutation corrupts state."}
+    ],
+    "missing_tests": [
+      {"id": "CI-T-001", "function": "OrderProcessor.process_order", "file": "src/sample_repo/app.py", "line": 27, "why_missing": "No test exercises the full flow including discount logic.", "suggested_test_name": "test_process_order_applies_bulk_discount", "suggested_test_description": "Given total > 1000, assert returned total equals pre-discount total * 0.9."},
+      {"id": "CI-T-002", "function": "OrderProcessor.process_order", "file": "src/sample_repo/app.py", "line": 27, "why_missing": "No test validates behaviour when order_data is missing required keys.", "suggested_test_name": "test_process_order_missing_keys_raises", "suggested_test_description": "Pass dicts missing 'user_id' then 'items'; assert ValueError raised."},
+      {"id": "CI-T-003", "function": "OrderProcessor.get_price", "file": "src/sample_repo/app.py", "line": 57, "why_missing": "No test covers cache hit vs cache miss paths.", "suggested_test_name": "test_get_price_returns_cached_value", "suggested_test_description": "Pre-populate cache; assert DB never called."},
+      {"id": "CI-T-004", "function": "OrderProcessor.calculate_tax", "file": "src/sample_repo/app.py", "line": 93, "why_missing": "Unknown country None-return is tested but asserted as acceptable, masking the bug.", "suggested_test_name": "test_calculate_tax_unknown_country_raises_or_returns_zero", "suggested_test_description": "Assert either ValueError or 0 — not None."},
+      {"id": "CI-T-005", "function": "OrderProcessor.calculate_tax", "file": "src/sample_repo/app.py", "line": 93, "why_missing": "UK and DE tax rates are untested.", "suggested_test_name": "test_calculate_tax_uk_and_de_rates", "suggested_test_description": "Assert 20% for UK and 19% for DE."},
+      {"id": "CI-T-006", "function": "OrderProcessor.cancel_order", "file": "src/sample_repo/app.py", "line": 84, "why_missing": "No test for non-existent order ID.", "suggested_test_name": "test_cancel_order_nonexistent_id_returns_false", "suggested_test_description": "Call with unknown ID; assert False without raising."},
+      {"id": "CI-T-007", "function": "OrderProcessor.cancel_order", "file": "src/sample_repo/app.py", "line": 84, "why_missing": "No test verifies DB is updated.", "suggested_test_name": "test_cancel_order_syncs_to_db", "suggested_test_description": "Mock db; assert UPDATE executed after cancel."},
+      {"id": "CI-T-008", "function": "OrderProcessor.get_all_orders", "file": "src/sample_repo/app.py", "line": 81, "why_missing": "No test verifies returned list is a copy.", "suggested_test_name": "test_get_all_orders_returns_immutable_copy", "suggested_test_description": "Append to result; assert internal list unchanged."},
+      {"id": "CI-T-009", "function": "UserManager.create_user", "file": "src/sample_repo/app.py", "line": 111, "why_missing": "No test verifies password hashing.", "suggested_test_name": "test_create_user_password_is_not_stored_plaintext", "suggested_test_description": "Assert stored password != raw input."},
+      {"id": "CI-T-010", "function": "UserManager.authenticate", "file": "src/sample_repo/app.py", "line": 124, "why_missing": "No test for wrong password.", "suggested_test_name": "test_authenticate_wrong_password_returns_none", "suggested_test_description": "Correct user, wrong password; assert None."},
+      {"id": "CI-T-011", "function": "UserManager.authenticate", "file": "src/sample_repo/app.py", "line": 124, "why_missing": "No test for unknown username.", "suggested_test_name": "test_authenticate_nonexistent_user_returns_none", "suggested_test_description": "Call on empty UserManager; assert None."},
+      {"id": "CI-T-012", "function": "UserManager.get_user", "file": "src/sample_repo/app.py", "line": 131, "why_missing": "No test exists.", "suggested_test_name": "test_get_user_returns_correct_user_by_id", "suggested_test_description": "Create two users; get second by ID; assert correct."},
+      {"id": "CI-T-013", "function": "bulk_import_orders", "file": "src/sample_repo/app.py", "line": 140, "why_missing": "No test exists at all.", "suggested_test_name": "test_bulk_import_orders_missing_file_raises", "suggested_test_description": "Assert FileNotFoundError for missing path."},
+      {"id": "CI-T-014", "function": "bulk_import_orders", "file": "src/sample_repo/app.py", "line": 140, "why_missing": "No happy-path test.", "suggested_test_name": "test_bulk_import_orders_valid_csv", "suggested_test_description": "Valid 2-row CSV; assert 2 results returned."},
+      {"id": "CI-T-015", "function": "generate_report", "file": "src/sample_repo/app.py", "line": 160, "why_missing": "Always returns empty; no date-boundary test.", "suggested_test_name": "test_generate_report_returns_orders_in_date_range", "suggested_test_description": "Mock get_all_orders; assert only in-range orders returned."},
+      {"id": "CI-T-016", "function": "utils.validate_email", "file": "src/sample_repo/utils.py", "line": 10, "why_missing": "No test for validate_email.", "suggested_test_name": "test_validate_email_rejects_invalid_formats", "suggested_test_description": "Assert 'notanemail' and '@' return False."},
+      {"id": "CI-T-017", "function": "utils.chunk", "file": "src/sample_repo/utils.py", "line": 38, "why_missing": "No test for chunk.", "suggested_test_name": "test_chunk_size_zero_raises", "suggested_test_description": "chunk([1,2,3], 0) should raise ValueError."},
+      {"id": "CI-T-018", "function": "utils.flatten", "file": "src/sample_repo/utils.py", "line": 27, "why_missing": "No test for flatten.", "suggested_test_name": "test_flatten_deeply_nested_list", "suggested_test_description": "flatten([1,[2,[3,[4]]]]) == [1,2,3,4]."},
+      {"id": "CI-T-019", "function": "utils.sanitize_input", "file": "src/sample_repo/utils.py", "line": 44, "why_missing": "No test documents its limited scope.", "suggested_test_name": "test_sanitize_input_only_strips_whitespace", "suggested_test_description": "Assert SQL chars pass through unchanged (documents the bug)."},
+      {"id": "CI-T-020", "function": "utils.retry", "file": "src/sample_repo/utils.py", "line": 16, "why_missing": "No test for retry.", "suggested_test_name": "test_retry_reraises_after_exhausting_attempts", "suggested_test_description": "Always-failing function; assert re-raises after 3 attempts."}
+    ],
+    "breakage_predictions": [
+      {"scenario": "config.json absent or malformed", "affected_components": ["app.CONFIG", "app.DATABASE_URL", "app.SECRET_KEY"], "likelihood": "high", "mitigation": "Wrap module-level load in try/except with fast-fail error message."},
+      {"scenario": "self.db is None when process_order called", "affected_components": ["OrderProcessor.process_order", "OrderProcessor.get_price", "OrderProcessor._save_order"], "likelihood": "high", "mitigation": "Raise explicit error in __init__ if db not provided. Use dependency injection."},
+      {"scenario": "SKU or order field contains SQL metacharacter", "affected_components": ["OrderProcessor.get_price", "OrderProcessor._save_order"], "likelihood": "high", "mitigation": "Replace f-string SQL with parameterised queries."},
+      {"scenario": "calculate_tax result used in arithmetic for unlisted country", "affected_components": ["OrderProcessor.calculate_tax", "OrderProcessor.process_order"], "likelihood": "high", "mitigation": "Add else branch raising ValueError for unsupported countries."},
+      {"scenario": "generate_report always returns empty list", "affected_components": ["generate_report"], "likelihood": "high", "mitigation": "Pass shared OrderProcessor or query DB directly."},
+      {"scenario": "bulk_import_orders CSV with non-integer quantity", "affected_components": ["bulk_import_orders", "OrderProcessor.process_order"], "likelihood": "high", "mitigation": "Wrap int() parse in try/except and continue on bad rows."},
+      {"scenario": "Password hashing migration breaks authenticate", "affected_components": ["UserManager.create_user", "UserManager.authenticate"], "likelihood": "medium", "mitigation": "Update both methods atomically. Add migration for existing data."},
+      {"scenario": "get_all_orders result mutated by caller", "affected_components": ["OrderProcessor.get_all_orders", "OrderProcessor.orders"], "likelihood": "medium", "mitigation": "Return list(self.orders)."},
+      {"scenario": "cancel_order called — DB and in-memory diverge", "affected_components": ["OrderProcessor.cancel_order", "OrderProcessor.db"], "likelihood": "medium", "mitigation": "Add DB UPDATE inside cancel_order within a transaction."},
+      {"scenario": "validate_email used as security gate with permissive regex", "affected_components": ["utils.validate_email", "UserManager.create_user"], "likelihood": "medium", "mitigation": "Strengthen regex or use email-validator library."}
+    ]
+  },
+
+  "documentation": {
+    "doc_gaps": [
+      {"id": "DA-001", "location": "src/sample_repo/app.py:140", "type": "missing", "description": "Function bulk_import_orders exists in code but is not documented in the README.", "suggestion": "Add README section describing bulk import, CSV format (user_id, sku, qty), and invocation."},
+      {"id": "DA-002", "location": "src/sample_repo/app.py:160", "type": "missing", "description": "Function generate_report exists but not documented beyond vague 'reporting' mention.", "suggestion": "Document parameters (start_date, end_date), expected date format, and return value."},
+      {"id": "DA-003", "location": "src/sample_repo/app.py:105", "type": "mismatch", "description": "UserManager exists but no API endpoints for user management are listed in README API section.", "suggestion": "Add user management endpoints or clarify UserManager is internal-only."},
+      {"id": "DA-004", "location": "src/sample_repo/README.md:22", "type": "mismatch", "description": "README documents HTTP endpoints but no HTTP routing layer exists in app.py.", "suggestion": "Add Flask/FastAPI routing or reframe API section as describing intended (not implemented) endpoints."},
+      {"id": "DA-005", "location": "src/sample_repo/utils.py:51", "type": "missing", "description": "_legacy_format_price has no docstring and is dead code.", "suggestion": "Remove the function or add a comment explaining its status."},
+      {"id": "DA-006", "location": "src/sample_repo/app.py:93", "type": "misleading", "description": "README states tax is supported for US/UK/DE but calculate_tax silently returns None for unknown countries.", "suggestion": "Document the limitation or update code to raise ValueError."}
+    ],
+    "missing_docstrings": [
+      {"file": "src/sample_repo/app.py", "function_or_class": "OrderProcessor.get_all_orders", "line": 81, "suggestion": "Document return value and warn about mutable reference."},
+      {"file": "src/sample_repo/app.py", "function_or_class": "OrderProcessor.__init__", "line": 22, "suggestion": "Describe db, orders, and cache attributes."},
+      {"file": "src/sample_repo/app.py", "function_or_class": "UserManager.__init__", "line": 108, "suggestion": "Describe users dict structure."},
+      {"file": "src/sample_repo/utils.py", "function_or_class": "_legacy_format_price", "line": 51, "suggestion": "Add deprecation note or remove entirely."}
+    ],
+    "readme_issues": [
+      {"id": "DA-R-001", "section": "Setup", "issue": "References requirements.txt but its location and contents are ambiguous.", "suggestion": "Create and commit a clear requirements.txt or use pyproject.toml."},
+      {"id": "DA-R-002", "section": "Configuration", "issue": "Only mentions DB credentials; 4 of 5 config fields undocumented.", "suggestion": "Document all fields: database_url, secret_key, debug, max_retries, log_level."},
+      {"id": "DA-R-003", "section": "API", "issue": "Documents three HTTP endpoints but no web framework exists in code.", "suggestion": "Add Flask/FastAPI routing or reframe as planned endpoints."},
+      {"id": "DA-R-004", "section": "Notes", "issue": "Claims user management and reporting are accessible — no public interface exists.", "suggestion": "Qualify or expose via documented interface."},
+      {"id": "DA-R-005", "section": "Notes", "issue": "Does not warn that unsupported country codes return None.", "suggestion": "Add warning about limited country support."}
+    ],
+    "config_doc_mismatches": [
+      {"config_key": "database_url", "documented": true, "issue": "Mentioned implicitly but key name and format never specified."},
+      {"config_key": "secret_key", "documented": false, "issue": "Not mentioned in README. Used for authentication; purpose and security implications undocumented."},
+      {"config_key": "debug", "documented": false, "issue": "Present in config.json set to true (risky default) but effect on application never described."},
+      {"config_key": "max_retries", "documented": false, "issue": "Not mentioned in README. Matches utils.retry default but the connection is never made explicit."},
+      {"config_key": "log_level", "documented": false, "issue": "Present in config.json but nothing in app.py reads or applies this value — dead config."}
+    ]
+  },
+
+  "test_coverage": {
+    "coverage_score": {
+      "functions_with_any_test": 3,
+      "functions_with_full_coverage": 1,
+      "total_functions": 21,
+      "estimated_line_coverage_pct": 9
+    },
+    "coverage_map": [
+      {"file": "src/sample_repo/app.py", "function": "process_order", "class_or_module": "OrderProcessor", "tested": "no", "existing_tests": [], "untested_paths": ["normal flow", "discount branch", "missing key handling", "_save_order side effects", "_notify_user side effects"]},
+      {"file": "src/sample_repo/app.py", "function": "get_price", "class_or_module": "OrderProcessor", "tested": "no", "existing_tests": [], "untested_paths": ["cache hit", "cache miss", "db=None crash", "SQL injection via sku"]},
+      {"file": "src/sample_repo/app.py", "function": "_generate_id", "class_or_module": "OrderProcessor", "tested": "no", "existing_tests": [], "untested_paths": ["returns non-empty string", "successive calls return different IDs"]},
+      {"file": "src/sample_repo/app.py", "function": "_save_order", "class_or_module": "OrderProcessor", "tested": "no", "existing_tests": [], "untested_paths": ["executes SQL", "db=None crash", "no transaction"]},
+      {"file": "src/sample_repo/app.py", "function": "_notify_user", "class_or_module": "OrderProcessor", "tested": "no", "existing_tests": [], "untested_paths": ["message format"]},
+      {"file": "src/sample_repo/app.py", "function": "get_all_orders", "class_or_module": "OrderProcessor", "tested": "no", "existing_tests": [], "untested_paths": ["returns mutable internal reference"]},
+      {"file": "src/sample_repo/app.py", "function": "cancel_order", "class_or_module": "OrderProcessor", "tested": "partial", "existing_tests": ["test_cancel_order"], "untested_paths": ["order not found", "no DB update regression"]},
+      {"file": "src/sample_repo/app.py", "function": "calculate_tax", "class_or_module": "OrderProcessor", "tested": "partial", "existing_tests": ["test_calculate_tax_us", "test_calculate_tax_unknown"], "untested_paths": ["UK branch", "DE branch", "None return bug"]},
+      {"file": "src/sample_repo/app.py", "function": "create_user", "class_or_module": "UserManager", "tested": "no", "existing_tests": [], "untested_paths": ["all fields present", "plaintext password bug", "duplicate username"]},
+      {"file": "src/sample_repo/app.py", "function": "authenticate", "class_or_module": "UserManager", "tested": "no", "existing_tests": [], "untested_paths": ["valid credentials", "wrong password", "unknown username"]},
+      {"file": "src/sample_repo/app.py", "function": "get_user", "class_or_module": "UserManager", "tested": "no", "existing_tests": [], "untested_paths": ["valid id", "invalid id", "O(n) scan correctness"]},
+      {"file": "src/sample_repo/app.py", "function": "bulk_import_orders", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["valid CSV", "empty lines", "file not found", "malformed lines"]},
+      {"file": "src/sample_repo/app.py", "function": "generate_report", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["date range filtering", "empty list", "always-empty bug"]},
+      {"file": "src/sample_repo/utils.py", "function": "validate_email", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["valid email", "no @ symbol", "empty string", "permissive regex edge cases"]},
+      {"file": "src/sample_repo/utils.py", "function": "retry", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["success on first try", "retry after failure", "re-raise after exhaustion"]},
+      {"file": "src/sample_repo/utils.py", "function": "flatten", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["flat list", "one level nesting", "deep nesting", "empty list"]},
+      {"file": "src/sample_repo/utils.py", "function": "chunk", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["even split", "uneven split", "size=0 raises", "empty list"]},
+      {"file": "src/sample_repo/utils.py", "function": "sanitize_input", "class_or_module": "module", "tested": "no", "existing_tests": [], "untested_paths": ["strips whitespace", "non-string conversion", "SQL chars pass through"]}
+    ],
+    "new_test_suggestions": [
+      {"id": "TC-001", "file": "src/sample_repo/app.py", "function": "process_order", "test_name": "test_process_order_no_discount", "test_description": "Verify order with total <= 1000 is processed without a discount.", "test_template": "def test_process_order_no_discount(mocker):\n    processor = OrderProcessor()\n    mocker.patch.object(processor, 'get_price', return_value=10.0)\n    mocker.patch.object(processor, '_save_order')\n    mocker.patch.object(processor, '_notify_user')\n    result = processor.process_order({'user_id': 'u1', 'items': [{'sku': 'SKU1', 'qty': 5}]})\n    assert result['total'] == 50.0\n    assert result['status'] == 'pending'"},
+      {"id": "TC-002", "file": "src/sample_repo/app.py", "function": "process_order", "test_name": "test_process_order_applies_discount_when_total_exceeds_1000", "test_description": "Verify 10% discount applied when raw total > 1000.", "test_template": "def test_process_order_applies_discount_when_total_exceeds_1000(mocker):\n    processor = OrderProcessor()\n    mocker.patch.object(processor, 'get_price', return_value=200.0)\n    mocker.patch.object(processor, '_save_order')\n    mocker.patch.object(processor, '_notify_user')\n    result = processor.process_order({'user_id': 'u2', 'items': [{'sku': 'SKU2', 'qty': 6}]})\n    assert result['total'] == pytest.approx(200.0 * 6 * 0.9)"},
+      {"id": "TC-003", "file": "src/sample_repo/app.py", "function": "get_price", "test_name": "test_get_price_cache_hit", "test_description": "Cached SKU returned without DB call.", "test_template": "def test_get_price_cache_hit(mocker):\n    processor = OrderProcessor()\n    processor.cache['SKU1'] = 42.0\n    mock_db = mocker.MagicMock()\n    processor.db = mock_db\n    assert processor.get_price('SKU1') == 42.0\n    mock_db.query.assert_not_called()"},
+      {"id": "TC-004", "file": "src/sample_repo/app.py", "function": "get_price", "test_name": "test_get_price_cache_miss_populates_cache", "test_description": "Cache miss calls DB and stores result.", "test_template": "def test_get_price_cache_miss_populates_cache(mocker):\n    processor = OrderProcessor()\n    mock_db = mocker.MagicMock()\n    mock_db.query.return_value = 99.0\n    processor.db = mock_db\n    price = processor.get_price('SKU2')\n    assert price == 99.0\n    assert processor.cache['SKU2'] == 99.0"},
+      {"id": "TC-005", "file": "src/sample_repo/app.py", "function": "cancel_order", "test_name": "test_cancel_order_not_found_returns_false", "test_description": "Non-existent order ID returns False.", "test_template": "def test_cancel_order_not_found_returns_false():\n    processor = OrderProcessor()\n    processor.orders = [{'id': 'abc123', 'status': 'pending', 'user_id': 1, 'total': 50}]\n    assert processor.cancel_order('nonexistent') is False"},
+      {"id": "TC-006", "file": "src/sample_repo/app.py", "function": "calculate_tax", "test_name": "test_calculate_tax_uk", "test_description": "UK rate 20%.", "test_template": "def test_calculate_tax_uk():\n    assert OrderProcessor().calculate_tax(100, 'UK') == pytest.approx(20.0)"},
+      {"id": "TC-007", "file": "src/sample_repo/app.py", "function": "calculate_tax", "test_name": "test_calculate_tax_de", "test_description": "DE rate 19%.", "test_template": "def test_calculate_tax_de():\n    assert OrderProcessor().calculate_tax(100, 'DE') == pytest.approx(19.0)"},
+      {"id": "TC-008", "file": "src/sample_repo/app.py", "function": "get_all_orders", "test_name": "test_get_all_orders_returns_mutable_reference", "test_description": "Documents current bug: mutation of result affects internal state.", "test_template": "def test_get_all_orders_returns_mutable_reference():\n    processor = OrderProcessor()\n    processor.orders = [{'id': '1', 'status': 'pending'}]\n    orders = processor.get_all_orders()\n    orders.append({'id': '2', 'status': 'pending'})\n    assert len(processor.orders) == 2  # documents mutable reference bug"},
+      {"id": "TC-009", "file": "src/sample_repo/app.py", "function": "create_user", "test_name": "test_create_user_returns_expected_fields", "test_description": "User dict contains all expected keys.", "test_template": "def test_create_user_returns_expected_fields():\n    manager = UserManager()\n    user = manager.create_user('alice', 'secret', 'alice@example.com')\n    assert user['username'] == 'alice'\n    assert user['email'] == 'alice@example.com'\n    assert 'id' in user and 'created_at' in user"},
+      {"id": "TC-010", "file": "src/sample_repo/app.py", "function": "authenticate", "test_name": "test_authenticate_valid_credentials", "test_description": "Correct credentials return user dict.", "test_template": "def test_authenticate_valid_credentials():\n    manager = UserManager()\n    manager.create_user('alice', 'secret', 'alice@example.com')\n    result = manager.authenticate('alice', 'secret')\n    assert result is not None and result['username'] == 'alice'"},
+      {"id": "TC-011", "file": "src/sample_repo/app.py", "function": "authenticate", "test_name": "test_authenticate_wrong_password_returns_none", "test_description": "Wrong password returns None.", "test_template": "def test_authenticate_wrong_password_returns_none():\n    manager = UserManager()\n    manager.create_user('alice', 'secret', 'alice@example.com')\n    assert manager.authenticate('alice', 'wrong') is None"},
+      {"id": "TC-012", "file": "src/sample_repo/app.py", "function": "authenticate", "test_name": "test_authenticate_unknown_user_returns_none", "test_description": "Unknown username returns None.", "test_template": "def test_authenticate_unknown_user_returns_none():\n    assert UserManager().authenticate('nobody', 'pass') is None"},
+      {"id": "TC-013", "file": "src/sample_repo/app.py", "function": "get_user", "test_name": "test_get_user_existing_id", "test_description": "Valid ID returns correct user.", "test_template": "def test_get_user_existing_id():\n    manager = UserManager()\n    manager.create_user('alice', 'secret', 'alice@example.com')\n    user = manager.get_user(1)\n    assert user is not None and user['username'] == 'alice'"},
+      {"id": "TC-014", "file": "src/sample_repo/app.py", "function": "get_user", "test_name": "test_get_user_nonexistent_id_returns_none", "test_description": "Unknown ID returns None.", "test_template": "def test_get_user_nonexistent_id_returns_none():\n    assert UserManager().get_user(999) is None"},
+      {"id": "TC-015", "file": "src/sample_repo/app.py", "function": "bulk_import_orders", "test_name": "test_bulk_import_orders_valid_csv", "test_description": "Valid CSV processes all rows.", "test_template": "def test_bulk_import_orders_valid_csv(mocker, tmp_path):\n    csv_file = tmp_path / 'orders.csv'\n    csv_file.write_text('u1,SKU1,2\\nu2,SKU2,3\\n')\n    mocker.patch('app.OrderProcessor.get_price', return_value=10.0)\n    mocker.patch('app.OrderProcessor._save_order')\n    mocker.patch('app.OrderProcessor._notify_user')\n    from app import bulk_import_orders\n    results = bulk_import_orders(str(csv_file))\n    assert len(results) == 2"},
+      {"id": "TC-016", "file": "src/sample_repo/app.py", "function": "bulk_import_orders", "test_name": "test_bulk_import_orders_file_not_found", "test_description": "Missing file raises FileNotFoundError.", "test_template": "def test_bulk_import_orders_file_not_found():\n    from app import bulk_import_orders\n    with pytest.raises(FileNotFoundError):\n        bulk_import_orders('/nonexistent/orders.csv')"},
+      {"id": "TC-017", "file": "src/sample_repo/app.py", "function": "generate_report", "test_name": "test_generate_report_filters_by_date_range", "test_description": "Only in-range orders returned.", "test_template": "def test_generate_report_filters_by_date_range(mocker):\n    from app import generate_report\n    mock_orders = [\n        {'id': '1', 'created_at': '2024-01-10', 'total': 100},\n        {'id': '2', 'created_at': '2024-02-15', 'total': 200},\n        {'id': '3', 'created_at': '2024-03-20', 'total': 300},\n    ]\n    mocker.patch('app.OrderProcessor.get_all_orders', return_value=mock_orders)\n    result = generate_report('2024-01-01', '2024-02-28')\n    assert len(result) == 2"},
+      {"id": "TC-018", "file": "src/sample_repo/utils.py", "function": "validate_email", "test_name": "test_validate_email_valid", "test_description": "Well-formed email returns True.", "test_template": "def test_validate_email_valid():\n    from utils import validate_email\n    assert validate_email('user@example.com') is True"},
+      {"id": "TC-019", "file": "src/sample_repo/utils.py", "function": "validate_email", "test_name": "test_validate_email_missing_at_returns_false", "test_description": "String without @ returns False.", "test_template": "def test_validate_email_missing_at_returns_false():\n    from utils import validate_email\n    assert validate_email('notanemail') is False"},
+      {"id": "TC-020", "file": "src/sample_repo/utils.py", "function": "retry", "test_name": "test_retry_succeeds_on_first_attempt", "test_description": "Returns result immediately when no exception raised.", "test_template": "def test_retry_succeeds_on_first_attempt():\n    from utils import retry\n    result = retry(lambda: 42)\n    assert result == 42"},
+      {"id": "TC-021", "file": "src/sample_repo/utils.py", "function": "retry", "test_name": "test_retry_succeeds_after_transient_failures", "test_description": "Retries and returns result on eventual success.", "test_template": "def test_retry_succeeds_after_transient_failures(mocker):\n    from utils import retry\n    mocker.patch('utils.time.sleep')\n    calls = {'n': 0}\n    def fn():\n        calls['n'] += 1\n        if calls['n'] < 3: raise ValueError()\n        return 'ok'\n    assert retry(fn, retries=3) == 'ok'"},
+      {"id": "TC-022", "file": "src/sample_repo/utils.py", "function": "retry", "test_name": "test_retry_raises_after_all_retries_exhausted", "test_description": "Re-raises after all attempts fail.", "test_template": "def test_retry_raises_after_all_retries_exhausted(mocker):\n    from utils import retry\n    mocker.patch('utils.time.sleep')\n    with pytest.raises(RuntimeError):\n        retry(lambda: (_ for _ in ()).throw(RuntimeError('fail')), retries=3)"},
+      {"id": "TC-023", "file": "src/sample_repo/utils.py", "function": "flatten", "test_name": "test_flatten_nested_list", "test_description": "Deeply nested list fully flattened.", "test_template": "def test_flatten_nested_list():\n    from utils import flatten\n    assert flatten([1, [2, [3, 4]], 5]) == [1, 2, 3, 4, 5]"},
+      {"id": "TC-024", "file": "src/sample_repo/utils.py", "function": "chunk", "test_name": "test_chunk_even_split", "test_description": "Even split produces equal-size chunks.", "test_template": "def test_chunk_even_split():\n    from utils import chunk\n    assert chunk([1, 2, 3, 4], 2) == [[1, 2], [3, 4]]"},
+      {"id": "TC-025", "file": "src/sample_repo/utils.py", "function": "sanitize_input", "test_name": "test_sanitize_input_strips_whitespace", "test_description": "Strips whitespace; does NOT remove SQL chars (documents bug).", "test_template": "def test_sanitize_input_strips_whitespace():\n    from utils import sanitize_input\n    assert sanitize_input('  hello  ') == 'hello'\n    assert \"'\" in sanitize_input(\"'; DROP TABLE--\")  # documents incomplete sanitization"}
+    ]
+  }
+}

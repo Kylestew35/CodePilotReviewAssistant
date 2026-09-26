@@ -1,0 +1,7 @@
+{
+  "database_url": "postgresql://admin:password123@localhost:5432/orders",
+  "secret_key": "super-secret-key-do-not-share",
+  "debug": true,
+  "max_retries": 3,
+  "log_level": "DEBUG"
+}
